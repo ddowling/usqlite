@@ -1,17 +1,19 @@
-EXAMPLE_MOD_DIR := $(USERMOD_DIR)
+USQLITE_MOD_DIR := $(USERMOD_DIR)
 
-# Add all C files to SRC_USERMOD.
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_module.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_connection.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_cursor.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_row.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_file.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_mem.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_vfs.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite_utils.c
-SRC_USERMOD += $(EXAMPLE_MOD_DIR)/usqlite.c
+# MicroPython binding sources — scanned for QSTRs.
+SRC_USERMOD_C += \
+    $(USQLITE_MOD_DIR)/usqlite_module.c \
+    $(USQLITE_MOD_DIR)/usqlite_connection.c \
+    $(USQLITE_MOD_DIR)/usqlite_cursor.c \
+    $(USQLITE_MOD_DIR)/usqlite_row.c \
+    $(USQLITE_MOD_DIR)/usqlite_file.c \
+    $(USQLITE_MOD_DIR)/usqlite_mem.c \
+    $(USQLITE_MOD_DIR)/usqlite_vfs.c \
+    $(USQLITE_MOD_DIR)/usqlite_utils.c
 
-# We can add our module folder to include paths if needed
-# This is not actually needed in this example.
-CFLAGS_USERMOD += -I$(EXAMPLE_MOD_DIR)
-SQLITE_MOD_DIR := $(USERMOD_DIR)
+# usqlite.c #includes sqlite3.c after applying compile-time configuration
+# (usqlite_config.h defines).  Kept in LIB to avoid QSTR-scanning the full
+# SQLite amalgamation.
+SRC_USERMOD_LIB_C += $(USQLITE_MOD_DIR)/usqlite.c
+
+CFLAGS_USERMOD += -I$(USQLITE_MOD_DIR)
