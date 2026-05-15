@@ -44,13 +44,13 @@ void usqlite_mem_init(void) {
 
     void *heap = m_malloc(MEMSYS5_HEAP_SIZE);
     if (!heap) {
-        mp_raise_msg_varg(&usqlite_Error, MP_ERROR_TEXT("Failed to alloc heap: %d"), HEAP_SIZE);
+        mp_raise_msg_varg(&usqlite_Error, MP_ERROR_TEXT("Failed to alloc heap: %d"), MEMSYS5_HEAP_SIZE);
         return;
     }
 
     LOGLINE;
     sqlite_heap = MP_OBJ_FROM_PTR(heap);
-    sqlite3_config(SQLITE_CONFIG_HEAP, heap, HEAP_SIZE, 0);
+    sqlite3_config(SQLITE_CONFIG_HEAP, heap, MEMSYS5_HEAP_SIZE, 0);
     LOGLINE;
 }
 #endif

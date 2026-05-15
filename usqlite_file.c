@@ -39,6 +39,9 @@ bool usqlite_file_exists(const char *pathname) {
     mp_obj_t ilistdir = usqlite_method(os, MP_QSTR_ilistdir);
 
     char path[MAXPATHNAME + 1];
+    if (strlen(pathname) >= sizeof(path)) {
+        return false;
+    }
     strcpy(path, pathname);
     const char *filename = pathname;
 
@@ -93,6 +96,8 @@ int usqlite_file_open(MPFILE *file, const char *pathname, int flags) {
     if (flags & SQLITE_OPEN_CREATE) {
         if (!usqlite_file_exists(pathname)) {
             *pMode++ = 'w';
+        } else {
+            *pMode++ = 'r';
         }
 
         *pMode++ = '+';

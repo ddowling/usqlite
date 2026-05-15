@@ -103,16 +103,20 @@ static void usqlite_cursor_print(const mp_print_t *print, mp_obj_t self_in, mp_p
 
 mp_obj_t usqlite_cursor_close(mp_obj_t self_in) {
     LOGFUNC;
-    // usqlite_logprintf(___FUNC___ "\n");
 
     usqlite_cursor_t *self = (usqlite_cursor_t *)MP_OBJ_TO_PTR(self_in);
-    if (!self->stmt) {
-        return mp_const_none;
+
+    if (self->connection) {
+        usqlite_connection_deregister(self->connection, self_in);
+        self->connection = NULL;
     }
 
-    usqlite_logprintf(___FUNC___ " closing: '%s'\n", sqlite3_sql(self->stmt));
-    sqlite3_finalize(self->stmt);
-    self->stmt = NULL;
+    if (self->stmt) {
+        usqlite_logprintf(___FUNC___ " closing: '%s'\n", sqlite3_sql(self->stmt));
+        sqlite3_finalize(self->stmt);
+        self->stmt = NULL;
+    }
+
     self->rowcount = -1;
     self->rc = SQLITE_OK;
 
@@ -160,18 +164,18 @@ static int bindParameter(sqlite3_stmt *stmt, int index, mp_obj_t value) {
         return sqlite3_bind_int(stmt, index, mp_obj_get_int(value));
     } else if (mp_obj_is_str(value)) {
         GET_STR_DATA_LEN(value, str, nstr);
-        return sqlite3_bind_text(stmt, index, (const char *)str, nstr, NULL);
+        return sqlite3_bind_text(stmt, index, (const char *)str, nstr, SQLITE_TRANSIENT);
     } else if (mp_obj_is_float(value)) {
         return sqlite3_bind_double(stmt, index, mp_obj_get_float(value));
     } else if (mp_obj_is_type(value, &mp_type_bytes)) {
         GET_STR_DATA_LEN(value, bytes, nbytes);
-        return sqlite3_bind_blob(stmt, index, bytes, nbytes, NULL);
+        return sqlite3_bind_blob(stmt, index, bytes, nbytes, SQLITE_TRANSIENT);
     }
     #if MICROPY_PY_BUILTINS_BYTEARRAY
     if (mp_obj_is_type(value, &mp_type_bytearray)) {
         mp_buffer_info_t buffer;
         if (mp_get_buffer(value, &buffer, MP_BUFFER_READ)) {
-            return sqlite3_bind_blob(stmt, index, buffer.buf, buffer.len, NULL);
+            return sqlite3_bind_blob(stmt, index, buffer.buf, buffer.len, SQLITE_TRANSIENT);
         }
     }
     #endif
@@ -278,9 +282,18 @@ static int bindParameters(sqlite3_stmt *stmt, mp_obj_t values) {
 static mp_obj_t usqlite_cursor_execute(size_t n_args, const mp_obj_t *args) {
     mp_obj_t self_in = args[0];
     usqlite_cursor_t *self = MP_OBJ_TO_PTR(self_in);
+
+    if (!self->connection) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Cursor is closed"));
+        return mp_const_none;
+    }
+
     const char *sql = mp_obj_str_get_str(args[1]);
 
-    usqlite_cursor_close(self_in);
+    if (self->stmt) {
+        sqlite3_finalize(self->stmt);
+        self->stmt = NULL;
+    }
 
     if (!sql || !*sql) {
         mp_raise_msg(&usqlite_Error, MP_ERROR_TEXT("Empty sql"));
@@ -346,9 +359,18 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usqlite_cursor_execute_obj, 2, 3, usq
 
 static mp_obj_t usqlite_cursor_executemany(mp_obj_t self_in, mp_obj_t sql_in) {
     usqlite_cursor_t *self = MP_OBJ_TO_PTR(self_in);
+
+    if (!self->connection) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Cursor is closed"));
+        return mp_const_none;
+    }
+
     const char *sql = mp_obj_str_get_str(sql_in);
 
-    usqlite_cursor_close(self_in);
+    if (self->stmt) {
+        sqlite3_finalize(self->stmt);
+        self->stmt = NULL;
+    }
 
     if (!sql || !*sql) {
         mp_raise_msg(&usqlite_Error, MP_ERROR_TEXT("Empty sql"));
@@ -471,7 +493,7 @@ static mp_obj_t usqlite_cursor_fetchone(mp_obj_t self_in) {
         : mp_const_none;
 
     if (self->rc == SQLITE_ROW) {
-        stepExecute(self_in);
+        stepExecute(self);
     }
 
     return result;
@@ -509,7 +531,7 @@ static mp_obj_t usqlite_cursor_fetchmany(size_t n_args, const mp_obj_t *args) {
     while (self->rc == SQLITE_ROW && (size < 0 || (int)listt->len < size)) {
         row = self->rowfactory(self);
         mp_obj_list_append(list, row);
-        stepExecute(args[0]);
+        stepExecute(self);
     }
 
     return list;
@@ -569,39 +591,29 @@ static void usqlite_cursor_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             return;
         }
 
-        const char* strConnection = "connection";
-        mp_obj_t objConnection = mp_obj_new_str(strConnection, strlen(strConnection));
-        qstr qstrConnection = mp_obj_str_get_qstr(objConnection);
-
-        if (attr == qstrConnection) {
+        switch (attr)
+        {
+        case MP_QSTR_connection:
             dest[0] = MP_OBJ_FROM_PTR(self->connection);
+            break;
+
+        case MP_QSTR_description:
+            dest[0] = usqlite_cursor_description(self->stmt);
+            break;
+
+        case MP_QSTR_lastrowid: {
+            sqlite3_int64 rowid = sqlite3_last_insert_rowid(self->connection->db);
+            dest[0] = rowid ? mp_obj_new_int_from_ll(rowid) : mp_const_none;
         }
-        else {
+            break;
 
-            switch (attr)
-            {
-            case MP_QSTR_connection:
-                dest[0] = MP_OBJ_FROM_PTR(self->connection);
-                break;
+        case MP_QSTR_rowcount:
+            dest[0] = mp_obj_new_int(self->rowcount);
+            break;
 
-            case MP_QSTR_description:
-                dest[0] = usqlite_cursor_description(self->stmt);
-                break;
-
-            case MP_QSTR_lastrowid: {
-                sqlite3_int64 rowid = sqlite3_last_insert_rowid(self->connection->db);
-                dest[0] = rowid ? mp_obj_new_int_from_ll(rowid) : mp_const_none;
-            }
-                                  break;
-
-            case MP_QSTR_rowcount:
-                dest[0] = mp_obj_new_int(self->rowcount);
-                break;
-
-            case MP_QSTR_arraysize:
-                dest[0] = mp_obj_new_int(self->arraysize);
-                break;
-            }
+        case MP_QSTR_arraysize:
+            dest[0] = mp_obj_new_int(self->arraysize);
+            break;
         }
     } else if (dest[1] != MP_OBJ_NULL) {
         switch (attr)
@@ -617,14 +629,8 @@ static void usqlite_cursor_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 // ------------------------------------------------------------------------------
 
 static mp_obj_t usqlite_cursor_del(mp_obj_t self_in) {
-    usqlite_cursor_t *self = MP_OBJ_TO_PTR(self_in);
-
     usqlite_logprintf(___FUNC___ "\n");
-
-    usqlite_cursor_close(self_in);
-    usqlite_connection_deregister(self->connection, self_in);
-
-    return mp_const_none;
+    return usqlite_cursor_close(self_in);
 }
 
 MP_DEFINE_CONST_FUN_OBJ_1(usqlite_cursor_del_obj, usqlite_cursor_del);

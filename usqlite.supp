@@ -1,0 +1,97 @@
+# Valgrind suppressions for MicroPython's conservative GC.
+#
+# MicroPython scans the entire CPU register set and stack for potential heap
+# pointers during GC collection. Valgrind reports these reads as "conditional
+# jump depends on uninitialised value" because stack slots and registers may
+# contain arbitrary values. This is expected behaviour for a conservative GC
+# and does not indicate a bug in usqlite or MicroPython.
+#
+# Usage:
+#   valgrind --suppressions=usqlite.supp <micropython> <script.py>
+
+# --- GC root collection: raw stack words read as potential pointers ----------
+
+{
+   mp_gc_collect_root_cond
+   Memcheck:Cond
+   fun:gc_collect_root
+   fun:gc_helper_collect_regs_and_stack
+}
+{
+   mp_gc_collect_root_value8
+   Memcheck:Value8
+   fun:gc_collect_root
+   fun:gc_helper_collect_regs_and_stack
+}
+
+# --- GC mark phase: following pointers found by stack scan ------------------
+
+{
+   mp_gc_mark_subtree_cond
+   Memcheck:Cond
+   fun:gc_mark_subtree
+   ...
+   fun:gc_collect_root
+   fun:gc_helper_collect_regs_and_stack
+}
+{
+   mp_gc_mark_subtree_value8
+   Memcheck:Value8
+   fun:gc_mark_subtree
+   ...
+   fun:gc_collect_root
+   fun:gc_helper_collect_regs_and_stack
+}
+
+# --- GC stack-overflow recovery during mark phase ---------------------------
+
+{
+   mp_gc_mark_subtree_via_overflow_cond
+   Memcheck:Cond
+   fun:gc_mark_subtree
+   fun:gc_deal_with_stack_overflow
+   ...
+}
+{
+   mp_gc_deal_with_stack_overflow_cond
+   Memcheck:Cond
+   fun:gc_deal_with_stack_overflow
+   ...
+}
+
+# --- GC sweep phase ---------------------------------------------------------
+
+{
+   mp_gc_sweep_free_blocks_cond
+   Memcheck:Cond
+   fun:gc_sweep_free_blocks
+   ...
+}
+
+# --- gc_alloc / gc_realloc: bitmap tainted by conservative stack scan -------
+# After collection the GC bitmap contains bits derived from uninitialised stack
+# words. Subsequent allocations (SQLite via mpmemMalloc/mpmemRealloc, and
+# MicroPython objects via m_malloc) use that bitmap to find free blocks.
+
+{
+   mp_gc_alloc_via_mpmem_malloc_cond
+   Memcheck:Cond
+   fun:gc_alloc
+   fun:mpmemMalloc
+   ...
+}
+{
+   mp_gc_alloc_via_mpmem_realloc_cond
+   Memcheck:Cond
+   fun:gc_alloc
+   fun:gc_realloc
+   fun:mpmemRealloc
+   ...
+}
+{
+   mp_gc_alloc_via_m_malloc_cond
+   Memcheck:Cond
+   fun:gc_alloc
+   fun:m_malloc
+   ...
+}

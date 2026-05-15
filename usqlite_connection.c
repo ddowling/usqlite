@@ -61,16 +61,11 @@ static mp_obj_t usqlite_connection_close(mp_obj_t self_in) {
         return mp_const_none;
     }
 
-    for (size_t i = 0; i < self->cursors.len; i++)
+    // cursor_close() removes each cursor from the list, so iterate until empty
+    while (self->cursors.len > 0)
     {
-        mp_obj_t cursor = self->cursors.items[i];
-        self->cursors.items[0] = mp_const_none;
+        mp_obj_t cursor = self->cursors.items[0];
         usqlite_cursor_close(cursor);
-        #if MICROPY_MALLOC_USES_ALLOCATED_SIZE
-        m_free(MP_OBJ_TO_PTR(cursor), sizeof(usqlite_cursor_t));
-        #else
-        m_free(MP_OBJ_TO_PTR(cursor));
-        #endif
     }
 
     usqlite_logprintf(___FUNC___ " closing '%s'\n", sqlite3_db_filename(self->db, NULL));
